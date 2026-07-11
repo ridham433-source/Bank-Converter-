@@ -3,3 +3,6 @@ pdfplumber
 pikepdf
 pandas
 openpyxl
+pytesseract
+opencv-python-headless
+Pillow

@@ -113,6 +113,16 @@ def find_header_row(words):
     return None, None
 
 
+def is_combined_amount_label(text):
+    """Detect a single merged Withdrawal/Deposit column, e.g. Kotak's
+    'Withdrawal(Dr)/Deposit(Cr)' -- one physical column holding both types
+    of amount, distinguished only by a (D)/(C) suffix on each value."""
+    t = re.sub(r'[^a-z ]', ' ', text.lower())
+    has_debit_word = any(kw in t for kw in ("withdrawal", "debit"))
+    has_credit_word = any(kw in t for kw in ("deposit", "credit"))
+    return has_debit_word and has_credit_word
+
+
 def build_columns(header_words, page_width):
     labels = merge_header_labels(header_words)
     groups = {}
@@ -120,12 +130,18 @@ def build_columns(header_words, page_width):
         col = classify_header_word(lab['text'])
         if col is None:
             continue
-        g = groups.setdefault(col, {"x0": lab['x0'], "x1": lab['x1']})
+        g = groups.setdefault(col, {"x0": lab['x0'], "x1": lab['x1'], "text": lab['text']})
         g["x0"] = min(g["x0"], lab['x0'])
         g["x1"] = max(g["x1"], lab['x1'])
+        g["text"] += ' ' + lab['text']
 
     if not groups:
-        return None
+        return None, None
+
+    combined_amount_col = None
+    for name, g in groups.items():
+        if name in ('withdrawal', 'deposit') and is_combined_amount_label(g['text']):
+            combined_amount_col = name
 
     ordered = sorted(groups.items(), key=lambda kv: kv[1]["x0"])
     boundaries = []
@@ -133,7 +149,7 @@ def build_columns(header_words, page_width):
         left = 0 if i == 0 else (ordered[i-1][1]["x1"] + g["x0"]) / 2
         right = page_width if i == len(ordered) - 1 else (g["x1"] + ordered[i+1][1]["x0"]) / 2
         boundaries.append((name, left, right))
-    return boundaries
+    return boundaries, combined_amount_col
 
 
 def calibrate_date_narration_boundary(boundaries, body_words):
@@ -183,6 +199,7 @@ def find_title_anchor(words):
 def find_footer_top(words, page_height):
     markers = ["hdfcbanklimited", "statementsummary", "endofstatement",
                "totals", "generatedon", "closingbalance"]
+    page_of_re = re.compile(r'page\s*\d+\s*of\s*\d+')
     candidates = []
     by_line = {}
     for w in words:
@@ -191,6 +208,9 @@ def find_footer_top(words, page_height):
             by_line.setdefault(key, []).append(w)
     for top, line_words in by_line.items():
         joined = "".join(w['text'].lower() for w in sorted(line_words, key=lambda w: w['x0']))
+        if page_of_re.search(joined):
+            candidates.append(top)
+            continue
         for m in markers:
             if m in joined:
                 candidates.append(top)
@@ -205,82 +225,84 @@ def get_grid_row_bands(page, table_top, table_bottom):
     return [(tops[i], tops[i+1]) for i in range(len(tops)-1)]
 
 
-def extract_transactions(pdf_path):
+def process_pages(pages):
+    """
+    Core row/column reconstruction, shared by both the PDF path (real
+    pdfplumber pages) and the image/OCR path (synthetic pages built from
+    Tesseract output). A "page" only needs: .width, .height, .lines (can be
+    empty), and .extract_words(x_tolerance=...).
+    """
     rows = []
     boundaries = None
+    combined_amount_col = None
     prev_table_top = None
     found_any_header = False
 
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            words = page.extract_words(x_tolerance=1.5)
-            header_top, header_words = find_header_row(words)
+    for page in pages:
+        words = page.extract_words(x_tolerance=1.5)
+        header_top, header_words = find_header_row(words)
 
-            if header_words:
-                found_any_header = True
-                new_boundaries = build_columns(header_words, page.width)
-                if new_boundaries:
-                    boundaries = new_boundaries
-                table_top = header_top + 8
-            elif boundaries is not None:
-                title_bottom = find_title_anchor(words)
-                if title_bottom is not None:
-                    table_top = title_bottom + 4
-                elif prev_table_top is not None:
-                    table_top = prev_table_top
-                else:
+        if header_words:
+            found_any_header = True
+            new_boundaries, new_combined = build_columns(header_words, page.width)
+            if new_boundaries:
+                boundaries = new_boundaries
+                combined_amount_col = new_combined
+            table_top = header_top + 8
+        elif boundaries is not None:
+            title_bottom = find_title_anchor(words)
+            if title_bottom is not None:
+                table_top = title_bottom + 4
+            elif prev_table_top is not None:
+                table_top = prev_table_top
+            else:
+                continue
+        else:
+            continue
+
+        prev_table_top = table_top
+        footer_top = find_footer_top(words, page.height)
+        table_bottom = footer_top - 2 if footer_top else page.height - 20
+
+        table_words = [w for w in words if table_top <= w['top'] <= table_bottom]
+        if not table_words or boundaries is None:
+            continue
+
+        if header_words:
+            boundaries = calibrate_date_narration_boundary(boundaries, table_words)
+
+        bands = get_grid_row_bands(page, table_top, table_bottom)
+
+        if bands:
+            for (top, bottom) in bands:
+                band_words = [w for w in table_words if top <= w['top'] < bottom]
+                if not band_words:
                     continue
-            else:
-                continue
-
-            prev_table_top = table_top
-            footer_top = find_footer_top(words, page.height)
-            table_bottom = footer_top - 2 if footer_top else page.height - 20
-
-            table_words = [w for w in words if table_top <= w['top'] <= table_bottom]
-            if not table_words or boundaries is None:
-                continue
-
-            if header_words:
-                boundaries = calibrate_date_narration_boundary(boundaries, table_words)
-
-            bands = get_grid_row_bands(page, table_top, table_bottom)
-
-            if bands:
-                for (top, bottom) in bands:
-                    band_words = [w for w in table_words if top <= w['top'] < bottom]
-                    if not band_words:
-                        continue
-                    band_words.sort(key=lambda w: (w['top'], w['x0']))
-                    row = {c: [] for c in CANONICAL_COLUMNS}
-                    for w in band_words:
-                        col = col_for_x(boundaries, w['x0'])
-                        if col:
-                            row[col].append(w['text'])
-                    rows.append(row)
-            else:
-                table_words.sort(key=lambda w: (round(w['top']), w['x0']))
-                lines = {}
-                for w in table_words:
-                    lines.setdefault(round(w['top']), []).append(w)
-
-                current = None
-                for top in sorted(lines.keys()):
-                    line_words = sorted(lines[top], key=lambda w: w['x0'])
-                    starts_new = any(
-                        col_for_x(boundaries, w['x0']) == 'date' and DATE_RE.match(w['text'])
-                        for w in line_words
-                    )
-                    if starts_new or current is None:
-                        if current is not None:
-                            rows.append(current)
-                        current = {c: [] for c in CANONICAL_COLUMNS}
-                    for w in line_words:
-                        col = col_for_x(boundaries, w['x0'])
-                        if col:
-                            current[col].append(w['text'])
-                if current is not None:
-                    rows.append(current)
+                band_words.sort(key=lambda w: (w['top'], w['x0']))
+                row = {c: [] for c in CANONICAL_COLUMNS}
+                for w in band_words:
+                    col = col_for_x(boundaries, w['x0'])
+                    if col:
+                        row[col].append(w['text'])
+                rows.append(row)
+        else:
+            current = None
+            for _avg_top, line_words in cluster_words_by_line(table_words, tolerance=2):
+                line_words = sorted(line_words, key=lambda w: w['x0'])
+                starts_new = any(
+                    col_for_x(boundaries, w['x0']) == 'date' and DATE_RE.match(w['text'])
+                    for w in line_words
+                )
+                if starts_new or current is None:
+                    if current is not None:
+                        rows.append(current)
+                    current = {c: [] for c in CANONICAL_COLUMNS}
+                for w in line_words:
+                    col = col_for_x(boundaries, w['x0'])
+                    if col:
+                        current[col].append(w['text'])
+            if current is not None:
+                rows.append(current)
 
     if not found_any_header:
         return None  # could not identify a transaction table at all
@@ -289,8 +311,105 @@ def extract_transactions(pdf_path):
     for r in rows:
         if not any(DATE_RE.match(tok) for tok in r["date"]):
             continue
-        result.append({c: " ".join(r[c]) for c in CANONICAL_COLUMNS})
+        flat = {c: " ".join(r[c]) for c in CANONICAL_COLUMNS}
+
+        if combined_amount_col:
+            # single Withdrawal/Deposit column (e.g. "980.50(D)") -- route
+            # into the correct canonical field using its (D)/(C) suffix
+            raw = flat[combined_amount_col]
+            other_col = 'deposit' if combined_amount_col == 'withdrawal' else 'withdrawal'
+            if re.search(r'\(c\)|cr\b', raw, re.IGNORECASE):
+                flat[other_col] = raw
+                flat[combined_amount_col] = ''
+            # else: leave it in combined_amount_col (already the debit-side field)
+
+        result.append(flat)
     return result
+
+
+def extract_transactions(pdf_path):
+    with pdfplumber.open(pdf_path) as pdf:
+        return process_pages(list(pdf.pages))
+
+
+# ---------------------------------------------------------------------------
+# IMAGE / PHOTO SUPPORT (OCR)
+# For photos of printed statements or passbooks. Accuracy depends heavily
+# on photo quality -- a flat, well-lit, cropped scan will read far better
+# than a tilted phone photo with background clutter.
+# ---------------------------------------------------------------------------
+
+class OCRPage:
+    """Mimics just enough of a pdfplumber Page for process_pages() to work
+    on OCR output: width, height, lines (always empty -- OCR gives us no
+    vector graphics), and extract_words()."""
+    def __init__(self, words, width, height):
+        self._words = words
+        self.width = width
+        self.height = height
+        self.lines = []
+
+    def extract_words(self, x_tolerance=1.5):
+        return self._words
+
+
+def preprocess_image_for_ocr(pil_image):
+    import cv2
+    import numpy as np
+    img = np.array(pil_image.convert("RGB"))[:, :, ::-1]  # RGB -> BGR
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # upscale small/low-res photos -- OCR does much better on larger text
+    h, w = gray.shape
+    if max(h, w) < 2200:
+        scale = 2200 / max(h, w)
+        gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+
+    _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return otsu
+
+
+def ocr_image_to_words(pil_image):
+    import pytesseract
+    processed = preprocess_image_for_ocr(pil_image)
+    ph, pw = processed.shape[:2]
+    orig_w, orig_h = pil_image.size
+    scale_x = orig_w / pw
+    scale_y = orig_h / ph
+
+    data = pytesseract.image_to_data(processed, config='--psm 6', output_type=pytesseract.Output.DICT)
+    words = []
+    n = len(data['text'])
+    for i in range(n):
+        text = data['text'][i].strip()
+        if not text:
+            continue
+        try:
+            conf = float(data['conf'][i])
+        except (ValueError, TypeError):
+            conf = -1
+        if conf < 25:  # discard very low-confidence noise
+            continue
+        left = data['left'][i] * scale_x
+        top = data['top'][i] * scale_y
+        width = data['width'][i] * scale_x
+        height = data['height'][i] * scale_y
+        words.append({
+            "text": text,
+            "x0": left,
+            "x1": left + width,
+            "top": top,
+            "bottom": top + height,
+        })
+    return words, orig_w, orig_h
+
+
+def extract_transactions_from_images(pil_images):
+    pages = []
+    for img in pil_images:
+        words, w, h = ocr_image_to_words(img)
+        pages.append(OCRPage(words, w, h))
+    return process_pages(pages)
 
 
 # ---------------------------------------------------------------------------
@@ -301,89 +420,69 @@ st.set_page_config(page_title="BankConverter", page_icon="🧾", layout="centere
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root {
-    --ink: #10403B;
-    --ink-soft: #4B5F5B;
-    --paper: #FAF7EF;
+    --ink: #1F2430;
+    --ink-soft: #6B7280;
+    --bg: #FAFBFC;
     --card: #FFFFFF;
-    --border: #E3DDCC;
-    --gold: #C89B3C;
-    --gold-soft: #EFE2BC;
-    --good: #2F7A4F;
-    --bad: #B3492D;
+    --border: #E5E7EB;
+    --accent: #4F63D2;
+    --accent-soft: #EEF1FD;
+    --good: #1F9D55;
+    --bad: #D0402B;
 }
 
-.stApp { background-color: var(--paper); }
+.stApp { background-color: var(--bg); }
 [data-testid="stHeader"] { background-color: transparent; }
-
 html, body, [class*="css"] { font-family: 'Inter', sans-serif; color: var(--ink); }
 
-h1, h2, h3 { font-family: 'Fraunces', serif !important; color: var(--ink) !important; font-weight: 600 !important; }
-
-.bc-hero { padding: 1.6rem 0 0.4rem 0; }
-.bc-hero h1 { font-size: 2.5rem; line-height: 1.15; margin-bottom: 0.4rem; }
+.bc-hero { text-align: center; padding: 2.2rem 0 0.6rem 0; }
+.bc-hero h1 { font-size: 2.3rem; font-weight: 800; margin-bottom: 0.5rem; letter-spacing: -0.02em; }
 .bc-hero p { color: var(--ink-soft); font-size: 1.05rem; margin-top: 0; }
 
-.bc-perf {
-    height: 1px;
-    background-image: radial-gradient(circle, var(--gold) 1.5px, transparent 1.5px);
-    background-size: 14px 1px;
-    margin: 1.4rem 0 1.8rem 0;
-    opacity: 0.7;
+.bc-badgerow { text-align: center; margin: 0.35rem 0; }
+.bc-badgerow .tag {
+    display: inline-block; font-size: 0.72rem; color: var(--ink-soft);
+    font-weight: 600; letter-spacing: 0.06em; margin-right: 0.5rem;
 }
+.bc-badge {
+    display: inline-block; background: #F1F3F6; color: var(--ink);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 0.2rem 0.75rem; font-size: 0.82rem; font-weight: 500;
+    margin: 0.15rem 0.2rem;
+}
+.bc-badge.out { background: var(--accent-soft); color: var(--accent); border-color: #D7DEFA; }
 
-.bc-stamp {
-    display: inline-block;
-    background: var(--gold-soft);
-    color: var(--ink);
-    border: 1px solid var(--gold);
-    border-radius: 999px;
-    padding: 0.35rem 1rem;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.85rem;
-    font-weight: 600;
-    margin-bottom: 0.8rem;
+.bc-divider { height: 1px; background: var(--border); margin: 1.6rem 0; }
+
+.bc-privacy { text-align: center; color: var(--ink-soft); font-size: 0.85rem; margin-top: 0.4rem; }
+
+[data-testid="stFileUploaderDropzone"] {
+    background-color: var(--card) !important;
+    border: 1.5px solid var(--border) !important;
+    border-radius: 14px !important;
 }
 
 .bc-cards { display: flex; gap: 0.8rem; flex-wrap: wrap; margin: 1rem 0 1.6rem 0; }
 .bc-card {
-    flex: 1 1 150px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 0.9rem 1.1rem;
+    flex: 1 1 150px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 0.9rem 1.1rem;
 }
-.bc-card .label { font-size: 0.78rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
-.bc-card .value { font-family: 'IBM Plex Mono', monospace; font-size: 1.35rem; font-weight: 600; color: var(--ink); }
+.bc-card .label { font-size: 0.76rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
+.bc-card .value { font-size: 1.3rem; font-weight: 700; color: var(--ink); }
 .bc-card.good .value { color: var(--good); }
 .bc-card.bad .value { color: var(--bad); }
 
-[data-testid="stFileUploaderDropzone"] {
-    background-color: var(--card) !important;
-    border: 1.5px dashed var(--gold) !important;
-    border-radius: 12px !important;
-}
-
 .stButton>button, .stDownloadButton>button {
-    background-color: var(--ink) !important;
-    color: var(--paper) !important;
-    border-radius: 8px !important;
-    border: none !important;
-    font-weight: 500 !important;
-    padding: 0.5rem 1rem !important;
+    background-color: var(--accent) !important; color: #FFFFFF !important;
+    border-radius: 8px !important; border: none !important;
+    font-weight: 600 !important; padding: 0.5rem 1rem !important;
 }
-.stButton>button:hover, .stDownloadButton>button:hover {
-    background-color: var(--gold) !important;
-    color: var(--ink) !important;
-}
+.stButton>button:hover, .stDownloadButton>button:hover { background-color: #3C4EB8 !important; }
 
-[data-testid="stDataFrame"] {
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    overflow: hidden;
-}
+[data-testid="stDataFrame"] { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 
 .bc-footer { color: var(--ink-soft); font-size: 0.85rem; text-align: center; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); }
 </style>
@@ -391,55 +490,94 @@ h1, h2, h3 { font-family: 'Fraunces', serif !important; color: var(--ink) !impor
 
 st.markdown("""
 <div class="bc-hero">
-  <span class="bc-stamp">🧾 STATEMENT → SPREADSHEET</span>
-  <h1>Turn any bank statement into a clean spreadsheet.</h1>
-  <p>Upload a PDF. We find the transaction table, reconstruct every row correctly, and hand you back an Excel or CSV file — no formatting, no cleanup.</p>
+  <h1>Convert Statements with Precision</h1>
+  <p>Clean, reliable extraction for all your financial documents.</p>
 </div>
-<div class="bc-perf"></div>
 """, unsafe_allow_html=True)
 
-uploaded = st.file_uploader("Upload your bank statement (PDF)", type=["pdf"])
+uploaded_files = st.file_uploader(
+    "Upload PDF or Photos",
+    type=["pdf", "png", "jpg", "jpeg"],
+    accept_multiple_files=True,
+    label_visibility="collapsed",
+)
 
-if uploaded is not None:
-    pdf_bytes = uploaded.read()
+st.markdown("""
+<div class="bc-badgerow"><span class="tag">INPUT</span>
+  <span class="bc-badge">PDF</span><span class="bc-badge">Photos</span>
+  <span class="bc-badge">JPG</span><span class="bc-badge">PNG</span>
+</div>
+<div class="bc-badgerow"><span class="tag">OUTPUT</span>
+  <span class="bc-badge out">Excel</span><span class="bc-badge out">CSV</span>
+</div>
+<div class="bc-divider"></div>
+<div class="bc-privacy">🔒 We do not store your data. Your privacy is our priority.</div>
+""", unsafe_allow_html=True)
 
-    # --- handle password-protected PDFs ---
-    is_encrypted = False
-    try:
-        with pikepdf.open(io.BytesIO(pdf_bytes)):
-            pass
-    except pikepdf.PasswordError:
-        is_encrypted = True
-    except Exception as e:
-        st.error(f"Could not open this PDF: {e}")
+if uploaded_files:
+    pdfs = [f for f in uploaded_files if f.type == "application/pdf" or f.name.lower().endswith(".pdf")]
+    images = [f for f in uploaded_files if f not in pdfs]
+
+    if pdfs and images:
+        st.error("Please upload either one PDF, or one or more photos — not both at once.")
+        st.stop()
+    if len(pdfs) > 1:
+        st.error("Please upload one PDF at a time.")
         st.stop()
 
-    working_bytes = pdf_bytes
-    if is_encrypted:
-        password = st.text_input("This PDF is password-protected. Enter the password:", type="password")
-        if not password:
-            st.info("Enter the password above to continue.")
-            st.stop()
+    rows = None
+
+    if pdfs:
+        uploaded = pdfs[0]
+        pdf_bytes = uploaded.read()
+
+        # --- handle password-protected PDFs ---
+        is_encrypted = False
         try:
-            with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
-                buf = io.BytesIO()
-                pdf.save(buf)
-                working_bytes = buf.getvalue()
+            with pikepdf.open(io.BytesIO(pdf_bytes)):
+                pass
         except pikepdf.PasswordError:
-            st.error("That password didn't work. Please try again.")
+            is_encrypted = True
+        except Exception as e:
+            st.error(f"Could not open this PDF: {e}")
             st.stop()
 
-    # --- run extraction ---
-    with st.spinner("Reading your statement..."):
-        with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
-            tmp.write(working_bytes)
-            tmp.flush()
-            rows = extract_transactions(tmp.name)
+        working_bytes = pdf_bytes
+        if is_encrypted:
+            password = st.text_input("This PDF is password-protected. Enter the password:", type="password")
+            if not password:
+                st.info("Enter the password above to continue.")
+                st.stop()
+            try:
+                with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
+                    buf = io.BytesIO()
+                    pdf.save(buf)
+                    working_bytes = buf.getvalue()
+            except pikepdf.PasswordError:
+                st.error("That password didn't work. Please try again.")
+                st.stop()
+
+        with st.spinner("Reading your statement..."):
+            with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
+                tmp.write(working_bytes)
+                tmp.flush()
+                rows = extract_transactions(tmp.name)
+
+    else:
+        st.info(
+            "📷 Photo extraction is in beta — accuracy depends a lot on photo quality. "
+            "For best results: use your phone's document **scan** mode (not a regular photo), "
+            "make sure the page is flat, well-lit, and fills the frame."
+        )
+        from PIL import Image as PILImage
+        pil_images = [PILImage.open(f) for f in images]
+        with st.spinner("Reading your photo(s)... this can take a moment"):
+            rows = extract_transactions_from_images(pil_images)
 
     if rows is None or len(rows) == 0:
         st.error(
-            "Couldn't identify a transaction table in this PDF. "
-            "This can happen with some bank statement layouts we haven't seen yet — "
+            "Couldn't identify a transaction table. "
+            "This can happen with some statement layouts (or unclear photos) we haven't seen yet — "
             "if you can share the file, it can be added to future support."
         )
         st.stop()
@@ -448,9 +586,12 @@ if uploaded is not None:
     df = df.rename(columns=DISPLAY_NAMES)
     df = df[[DISPLAY_NAMES[c] for c in CANONICAL_COLUMNS]]
 
+    if images:
+        st.warning("This was read from a photo — please double-check the numbers before relying on this file.")
+
     # --- stats ---
     def _num(s):
-        s = str(s).replace(',', '').replace('CR', '').replace('DR', '').strip()
+        s = str(s).replace(',', '').replace('CR', '').replace('DR', '').replace('(C)', '').replace('(D)', '').strip()
         try:
             return float(s)
         except ValueError:
@@ -517,7 +658,7 @@ if uploaded is not None:
     preview_df = df[selected]
 
     # --- preview ---
-    st.markdown('<div class="bc-perf"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="bc-divider"></div>', unsafe_allow_html=True)
     st.subheader("Preview")
     st.dataframe(preview_df.head(20), use_container_width=True, hide_index=True)
 
