@@ -20,6 +20,17 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 
 DATE_RE = re.compile(r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$')
+MONTH_NAME_DATE_RE = re.compile(
+    r'^\d{1,2}\s+[A-Za-z]{3,9}\.?\s+\d{2,4}$'  # e.g. "01 Jun 2026", "1 January 26"
+)
+
+
+def looks_like_date(text):
+    """True if text (possibly multiple words joined) reads as a date,
+    covering both numeric ("01/06/2026") and month-name ("01 Jun 2026")
+    formats used by different banks."""
+    t = text.strip()
+    return bool(DATE_RE.match(t) or MONTH_NAME_DATE_RE.match(t))
 
 CANONICAL_COLUMNS = ["date", "narration", "ref_no", "value_dt", "withdrawal", "deposit", "balance"]
 
@@ -102,14 +113,29 @@ def cluster_words_by_line(words, tolerance=3):
 
 
 def find_header_row(words):
-    for top, line_words in cluster_words_by_line(words, tolerance=3):
+    lines = cluster_words_by_line(words, tolerance=3)
+
+    def is_valid_header(line_words):
         labels = merge_header_labels(line_words)
         classified = [classify_header_word(lab['text']) for lab in labels]
         has_date = 'date' in classified
         has_narr = 'narration' in classified
         has_amt = any(c in ('withdrawal', 'deposit', 'balance') for c in classified)
-        if has_date and has_narr and has_amt:
+        return has_date and has_narr and has_amt
+
+    for i, (top, line_words) in enumerate(lines):
+        if is_valid_header(line_words):
             return top, line_words
+
+        # some headers wrap a label across two stacked lines (e.g.
+        # "Transaction" / "Date") -- try combining with the next line too
+        if i + 1 < len(lines):
+            next_top, next_words = lines[i + 1]
+            if next_top - top < 15:
+                combined = line_words + next_words
+                if is_valid_header(combined):
+                    return top, combined
+
     return None, None
 
 
@@ -289,10 +315,8 @@ def process_pages(pages):
             current = None
             for _avg_top, line_words in cluster_words_by_line(table_words, tolerance=2):
                 line_words = sorted(line_words, key=lambda w: w['x0'])
-                starts_new = any(
-                    col_for_x(boundaries, w['x0']) == 'date' and DATE_RE.match(w['text'])
-                    for w in line_words
-                )
+                date_col_tokens = [w['text'] for w in line_words if col_for_x(boundaries, w['x0']) == 'date']
+                starts_new = looks_like_date(' '.join(date_col_tokens))
                 if starts_new or current is None:
                     if current is not None:
                         rows.append(current)
@@ -309,7 +333,7 @@ def process_pages(pages):
 
     result = []
     for r in rows:
-        if not any(DATE_RE.match(tok) for tok in r["date"]):
+        if not looks_like_date(' '.join(r["date"])):
             continue
         flat = {c: " ".join(r[c]) for c in CANONICAL_COLUMNS}
 
