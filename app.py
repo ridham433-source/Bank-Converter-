@@ -552,24 +552,21 @@ st.markdown("""
 html { color-scheme: light !important; }
 .stApp { background-color: var(--bg) !important; }
 [data-testid="stHeader"] { background-color: transparent !important; }
-html, body, [class*="css"], [data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] p,
-h1, h2, h3, p, span, label, div {
+html, body { font-family: 'Inter', sans-serif; }
+[data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] h1, [data-testid="stMarkdownContainer"] h2, [data-testid="stMarkdownContainer"] h3,
+[data-testid="stMarkdownContainer"] li {
     font-family: 'Inter', sans-serif !important;
     color: var(--ink) !important;
 }
 
 /* Streamlit's native file-uploader instruction text ("Drag and drop
    file here", size/type limits) isn't covered by our custom markdown,
-   so it needs its own explicit color rule -- scoped narrowly so it
-   doesn't clobber the upload button's own (white-on-dark) label. */
+   so it needs its own explicit color rule. */
 [data-testid="stFileUploaderDropzoneInstructions"] span,
 [data-testid="stFileUploaderDropzoneInstructions"] small,
 [data-testid="stFileUploaderDropzoneInstructions"] div {
     color: var(--ink-soft) !important;
-}
-[data-testid="stFileUploaderDropzone"] button,
-[data-testid="stFileUploaderDropzone"] button * {
-    color: #FFFFFF !important;
 }
 
 .bc-hero { text-align: center; padding: 2.2rem 0 0.6rem 0; }
@@ -618,7 +615,12 @@ h1, h2, h3, p, span, label, div {
 
 [data-testid="stDataFrame"] { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 
-.bc-brand { text-align: center; font-size: 1.05rem; font-weight: 700; color: var(--accent) !important; letter-spacing: 0.02em; margin-top: 0.5rem; }
+.bc-brand {
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    font-size: 1.7rem; font-weight: 800; color: var(--accent) !important;
+    letter-spacing: -0.01em; margin-bottom: 1.6rem;
+}
+.bc-brand .icon { font-size: 1.5rem; }
 
 .bc-footer { color: var(--ink-soft); font-size: 0.85rem; text-align: center; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); }
 </style>
@@ -626,7 +628,7 @@ h1, h2, h3, p, span, label, div {
 
 st.markdown("""
 <div class="bc-hero">
-  <div class="bc-brand">📊 Bank2Excel</div>
+  <div class="bc-brand"><span class="icon">📊</span>Bank2Excel</div>
   <h1>Convert Statements with Precision</h1>
   <p>Clean, reliable extraction for all your financial documents.</p>
 </div>
