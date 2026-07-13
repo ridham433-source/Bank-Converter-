@@ -28,8 +28,9 @@ MONTH_NAME_DATE_RE = re.compile(
 def looks_like_date(text):
     """True if text (possibly multiple words joined) reads as a date,
     covering both numeric ("01/06/2026") and month-name ("01 Jun 2026")
-    formats used by different banks."""
-    t = text.strip()
+    formats used by different banks. Tolerant of trailing punctuation
+    (a common OCR artifact on scanned/photographed statements)."""
+    t = text.strip().rstrip('.,;:')
     return bool(DATE_RE.match(t) or MONTH_NAME_DATE_RE.match(t))
 
 CANONICAL_COLUMNS = ["date", "narration", "ref_no", "value_dt", "withdrawal", "deposit", "balance"]
@@ -94,19 +95,21 @@ def merge_header_labels(line_words, gap=7):
 
 def cluster_words_by_line(words, tolerance=3):
     """Group words into visual lines, tolerant of small baseline jitter
-    between words that are meant to be on the same header row."""
+    between words that are meant to be on the same header row. Compares
+    each word to the PREVIOUS word's top (rolling), not a fixed anchor,
+    so gradual drift across a row (common in scanned/OCR'd documents)
+    doesn't fracture one row into several."""
     ordered = sorted(words, key=lambda w: w['top'])
     lines = []
     cur = []
-    cur_top = None
+    prev_top = None
     for w in ordered:
-        if cur_top is None or abs(w['top'] - cur_top) <= tolerance:
+        if prev_top is None or abs(w['top'] - prev_top) <= tolerance:
             cur.append(w)
-            cur_top = w['top'] if cur_top is None else cur_top
         else:
             lines.append(cur)
             cur = [w]
-            cur_top = w['top']
+        prev_top = w['top']
     if cur:
         lines.append(cur)
     return [(sum(w['top'] for w in ln) / len(ln), ln) for ln in lines]
@@ -181,7 +184,11 @@ def build_columns(header_words, page_width):
 def calibrate_date_narration_boundary(boundaries, body_words):
     """Header-label position is unreliable for the Date/Narration split
     specifically (the 'Narration' label sits far right of where narration
-    text actually starts) -- recalibrate using real body text."""
+    text actually starts) -- recalibrate using real body text.
+
+    Uses the actual gap between date-column text and the next word on the
+    same line (rather than a fixed buffer), since that gap can be very
+    small on tightly-spaced scanned/photographed statements."""
     date_tokens = [w for w in body_words if DATE_RE.match(w['text'])]
     if not date_tokens:
         return boundaries
@@ -190,7 +197,26 @@ def calibrate_date_narration_boundary(boundaries, body_words):
     date_col_tokens = [w for w in date_tokens if w['x0'] < leftmost_x0 + 15]
     if len(date_col_tokens) < 3:
         return boundaries
-    calibrated_right = max(w['x1'] for w in date_col_tokens) + 5
+    date_max_x1 = max(w['x1'] for w in date_col_tokens)
+
+    # for each date token, find the nearest word to its right on the same
+    # line -- that word's x0 is the real narration start for that row
+    next_word_x0s = []
+    for dt in date_col_tokens:
+        same_line = [w for w in body_words if abs(w['top'] - dt['top']) < 3 and w['x0'] > dt['x1']]
+        if same_line:
+            nearest = min(same_line, key=lambda w: w['x0'])
+            next_word_x0s.append(nearest['x0'])
+
+    if next_word_x0s:
+        narration_min_x0 = min(next_word_x0s)
+        gap = narration_min_x0 - date_max_x1
+        # sit close to the date text's own right edge rather than the
+        # midpoint -- a midpoint can still clip a narration token that
+        # starts unusually close on one particular row (e.g. scanned docs)
+        calibrated_right = date_max_x1 + min(3, gap * 0.3)
+    else:
+        calibrated_right = date_max_x1 + 3
 
     new_boundaries = []
     for (name, left, right) in boundaries:
@@ -201,6 +227,35 @@ def calibrate_date_narration_boundary(boundaries, body_words):
         else:
             new_boundaries.append((name, left, right))
     return new_boundaries
+
+
+def looks_like_amount(text):
+    """True if a token looks like a currency value (allowing the common
+    OCR artifacts we normalize elsewhere: hyphen-as-decimal, (D)/(C)
+    suffixes). Used to catch narration fragments that drift into an
+    amount column due to per-page boundary drift on scanned documents."""
+    t = text.strip()
+    return bool(re.match(r'^-?[\d,]+([.\-]\d{1,2})?\s*\(?[A-Za-z]{0,2}\)?$', t))
+
+
+def looks_like_amount(text):
+    """True if a token looks like a currency value (allowing the common
+    OCR artifacts we normalize elsewhere: hyphen-as-decimal, (D)/(C)
+    suffixes). Used to catch narration fragments that drift into an
+    amount column due to per-page boundary drift on scanned documents."""
+    t = text.strip()
+    return bool(re.match(r'^-?[\d,]+([.\-]\d{1,2})?\s*\(?[A-Za-z]{0,2}\)?$', t))
+
+
+def assign_token(row, col, text):
+    """Put a token in its classified column -- unless that column is an
+    amount field and the token doesn't actually look like an amount, in
+    which case it's almost certainly a narration fragment that drifted
+    in from per-page boundary noise, so keep it with the narration."""
+    if col in ('withdrawal', 'deposit') and not looks_like_amount(text):
+        row['narration'].append(text)
+    else:
+        row[col].append(text)
 
 
 def col_for_x(boundaries, x0):
@@ -222,16 +277,23 @@ def find_title_anchor(words):
     return None
 
 
-def find_footer_top(words, page_height):
+def find_footer_top(words, page_height, header_top=None):
+    # These are specific enough bank-statement footer phrases that
+    # searching the whole page (not just the bottom half) is safe -- a
+    # page that's mostly a closing summary can start well above the
+    # midpoint. The one thing that must be excluded is the header row
+    # itself: a "Closing Balance" COLUMN TITLE matches the same markers
+    # we're looking for in the footer, so skip anything near header_top.
     markers = ["hdfcbanklimited", "statementsummary", "endofstatement",
                "totals", "generatedon", "closingbalance"]
     page_of_re = re.compile(r'page\s*\d+\s*of\s*\d+')
     candidates = []
     by_line = {}
     for w in words:
-        if w['top'] > page_height * 0.5:
-            key = round(w['top'])
-            by_line.setdefault(key, []).append(w)
+        if header_top is not None and abs(w['top'] - header_top) < 20:
+            continue
+        key = round(w['top'])
+        by_line.setdefault(key, []).append(w)
     for top, line_words in by_line.items():
         joined = "".join(w['text'].lower() for w in sorted(line_words, key=lambda w: w['x0']))
         if page_of_re.search(joined):
@@ -262,7 +324,11 @@ def process_pages(pages):
     boundaries = None
     combined_amount_col = None
     prev_table_top = None
+    header_page_size = None
     found_any_header = False
+    current = None  # in-progress transaction; persists ACROSS pages so a
+                     # narration that wraps across a physical page break
+                     # (common in scanned multi-page passbooks) isn't lost
 
     for page in pages:
         words = page.extract_words(x_tolerance=1.5)
@@ -275,27 +341,44 @@ def process_pages(pages):
                 boundaries = new_boundaries
                 combined_amount_col = new_combined
             table_top = header_top + 8
+            header_page_size = (page.width, page.height)
         elif boundaries is not None:
             title_bottom = find_title_anchor(words)
+            same_size_as_header_page = (
+                header_page_size is not None
+                and abs(page.width - header_page_size[0]) < header_page_size[0] * 0.05
+                and abs(page.height - header_page_size[1]) < header_page_size[1] * 0.05
+            )
             if title_bottom is not None:
                 table_top = title_bottom + 4
-            elif prev_table_top is not None:
+            elif same_size_as_header_page and prev_table_top is not None:
+                # true continuation page of a consistent multi-page PDF --
+                # safe to reuse the offset from where the header was found
                 table_top = prev_table_top
             else:
-                continue
+                # different page size (e.g. a separately cropped/scanned
+                # photo) -- there's no reliable anchor, so don't guess a
+                # foreign y-offset. Start near the very top instead.
+                table_top = 2
         else:
             continue
 
         prev_table_top = table_top
-        footer_top = find_footer_top(words, page.height)
+        footer_top = find_footer_top(words, page.height, header_top=header_top)
         table_bottom = footer_top - 2 if footer_top else page.height - 20
 
         table_words = [w for w in words if table_top <= w['top'] <= table_bottom]
         if not table_words or boundaries is None:
             continue
 
+        # recalibrate on EVERY page, not just pages with their own header --
+        # each page may be an independently cropped photo whose columns
+        # drift slightly from the page the boundaries were first built on.
+        # Use a page-local copy so a noisy page can't corrupt the shared
+        # boundaries carried forward to later pages.
+        page_boundaries = calibrate_date_narration_boundary(boundaries, table_words)
         if header_words:
-            boundaries = calibrate_date_narration_boundary(boundaries, table_words)
+            boundaries = page_boundaries
 
         bands = get_grid_row_bands(page, table_top, table_bottom)
 
@@ -307,26 +390,26 @@ def process_pages(pages):
                 band_words.sort(key=lambda w: (w['top'], w['x0']))
                 row = {c: [] for c in CANONICAL_COLUMNS}
                 for w in band_words:
-                    col = col_for_x(boundaries, w['x0'])
+                    col = col_for_x(page_boundaries, w['x0'])
                     if col:
-                        row[col].append(w['text'])
+                        assign_token(row, col, w['text'])
                 rows.append(row)
         else:
-            current = None
-            for _avg_top, line_words in cluster_words_by_line(table_words, tolerance=2):
+            for _avg_top, line_words in cluster_words_by_line(table_words, tolerance=4):
                 line_words = sorted(line_words, key=lambda w: w['x0'])
-                date_col_tokens = [w['text'] for w in line_words if col_for_x(boundaries, w['x0']) == 'date']
+                date_col_tokens = [w['text'] for w in line_words if col_for_x(page_boundaries, w['x0']) == 'date']
                 starts_new = looks_like_date(' '.join(date_col_tokens))
                 if starts_new or current is None:
                     if current is not None:
                         rows.append(current)
                     current = {c: [] for c in CANONICAL_COLUMNS}
                 for w in line_words:
-                    col = col_for_x(boundaries, w['x0'])
+                    col = col_for_x(page_boundaries, w['x0'])
                     if col:
-                        current[col].append(w['text'])
-            if current is not None:
-                rows.append(current)
+                        assign_token(current, col, w['text'])
+
+    if current is not None:
+        rows.append(current)
 
     if not found_any_header:
         return None  # could not identify a transaction table at all
@@ -336,6 +419,13 @@ def process_pages(pages):
         if not looks_like_date(' '.join(r["date"])):
             continue
         flat = {c: " ".join(r[c]) for c in CANONICAL_COLUMNS}
+        flat['date'] = flat['date'].strip().rstrip('.,;:')
+
+        # OCR/scan artifact: a decimal point sometimes gets misread as a
+        # hyphen (e.g. "1000-00" instead of "1000.00"). Only safe to fix
+        # in amount fields, which should contain nothing but currency.
+        for amt_col in ('withdrawal', 'deposit', 'balance'):
+            flat[amt_col] = re.sub(r'(?<=\d)-(?=\d{2}\b)', '.', flat[amt_col])
 
         if combined_amount_col:
             # single Withdrawal/Deposit column (e.g. "980.50(D)") -- route
@@ -456,15 +546,32 @@ st.markdown("""
     --accent-soft: #EEF1FD;
     --good: #1F9D55;
     --bad: #D0402B;
+    color-scheme: light !important;
 }
 
-.stApp { background-color: var(--bg); }
-[data-testid="stHeader"] { background-color: transparent; }
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; color: var(--ink); }
+html { color-scheme: light !important; }
+.stApp { background-color: var(--bg) !important; }
+[data-testid="stHeader"] { background-color: transparent !important; }
+html, body, [class*="css"], [data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] p,
+h1, h2, h3, p, span, label, div {
+    font-family: 'Inter', sans-serif !important;
+    color: var(--ink) !important;
+}
+
+/* Streamlit's native file-uploader instruction text ("Drag and drop
+   file here", size/type limits) isn't covered by our custom markdown,
+   so it needs its own explicit color rule. */
+[data-testid="stFileUploaderDropzone"] * {
+    color: var(--ink-soft) !important;
+}
+[data-testid="stFileUploaderDropzoneInstructions"] span,
+[data-testid="stFileUploaderDropzoneInstructions"] small {
+    color: var(--ink-soft) !important;
+}
 
 .bc-hero { text-align: center; padding: 2.2rem 0 0.6rem 0; }
-.bc-hero h1 { font-size: 2.3rem; font-weight: 800; margin-bottom: 0.5rem; letter-spacing: -0.02em; }
-.bc-hero p { color: var(--ink-soft); font-size: 1.05rem; margin-top: 0; }
+.bc-hero h1 { font-size: 2.3rem; font-weight: 800; margin-bottom: 0.5rem; letter-spacing: -0.02em; color: var(--ink) !important; }
+.bc-hero p { color: var(--ink-soft) !important; font-size: 1.05rem; margin-top: 0; }
 
 .bc-badgerow { text-align: center; margin: 0.35rem 0; }
 .bc-badgerow .tag {
@@ -547,6 +654,24 @@ if uploaded_files:
         st.stop()
     if len(pdfs) > 1:
         st.error("Please upload one PDF at a time.")
+        st.stop()
+
+    file_signature = tuple((f.name, f.size) for f in uploaded_files)
+    if st.session_state.get("last_file_signature") != file_signature:
+        st.session_state["converted"] = False
+        st.session_state["last_file_signature"] = file_signature
+
+    st.markdown('<div style="text-align:center; margin: 1rem 0;">', unsafe_allow_html=True)
+    convert_clicked = st.button("✅  Convert", use_container_width=False, type="primary")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if "converted" not in st.session_state:
+        st.session_state["converted"] = False
+    if convert_clicked:
+        st.session_state["converted"] = True
+
+    if not st.session_state["converted"]:
+        st.info("Uploaded — click **Convert** above to process this statement.")
         st.stop()
 
     rows = None
