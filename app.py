@@ -530,7 +530,7 @@ def extract_transactions_from_images(pil_images):
 # STREAMLIT UI
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="BankConverter", page_icon="🧾", layout="centered")
+st.set_page_config(page_title="Bank2Excel", page_icon="🧾", layout="centered")
 
 st.markdown("""
 <style>
@@ -560,13 +560,16 @@ h1, h2, h3, p, span, label, div {
 
 /* Streamlit's native file-uploader instruction text ("Drag and drop
    file here", size/type limits) isn't covered by our custom markdown,
-   so it needs its own explicit color rule. */
-[data-testid="stFileUploaderDropzone"] * {
+   so it needs its own explicit color rule -- scoped narrowly so it
+   doesn't clobber the upload button's own (white-on-dark) label. */
+[data-testid="stFileUploaderDropzoneInstructions"] span,
+[data-testid="stFileUploaderDropzoneInstructions"] small,
+[data-testid="stFileUploaderDropzoneInstructions"] div {
     color: var(--ink-soft) !important;
 }
-[data-testid="stFileUploaderDropzoneInstructions"] span,
-[data-testid="stFileUploaderDropzoneInstructions"] small {
-    color: var(--ink-soft) !important;
+[data-testid="stFileUploaderDropzone"] button,
+[data-testid="stFileUploaderDropzone"] button * {
+    color: #FFFFFF !important;
 }
 
 .bc-hero { text-align: center; padding: 2.2rem 0 0.6rem 0; }
@@ -615,12 +618,15 @@ h1, h2, h3, p, span, label, div {
 
 [data-testid="stDataFrame"] { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 
+.bc-brand { text-align: center; font-size: 1.05rem; font-weight: 700; color: var(--accent) !important; letter-spacing: 0.02em; margin-top: 0.5rem; }
+
 .bc-footer { color: var(--ink-soft); font-size: 0.85rem; text-align: center; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <div class="bc-hero">
+  <div class="bc-brand">📊 Bank2Excel</div>
   <h1>Convert Statements with Precision</h1>
   <p>Clean, reliable extraction for all your financial documents.</p>
 </div>
@@ -839,4 +845,4 @@ if uploaded_files:
             use_container_width=True,
         )
 
-st.markdown('<div class="bc-footer">BankConverter — your files are processed for this session only.</div>', unsafe_allow_html=True)
+st.markdown('<div class="bc-footer">Bank2Excel — your files are processed for this session only.</div>', unsafe_allow_html=True)
