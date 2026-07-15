@@ -8,6 +8,7 @@ import os
 import re
 import tempfile
 import uuid
+import zipfile
 from pathlib import Path
 
 import pandas as pd
@@ -45,6 +46,58 @@ def archive_uploaded_file(uploaded_file):
     except Exception as e:
         st.warning(f"Couldn't archive a debug copy of '{uploaded_file.name}' ({e}). Conversion will continue normally.")
         return False
+
+
+def render_admin_panel():
+    """Beta-only: lets the app owner retrieve archived statements as a ZIP
+    download, since Streamlit Community Cloud has no file browser. Hidden
+    behind a URL flag (?admin=true) plus a passcode, so ordinary users
+    visiting the app never see or reach this."""
+    st.markdown("---")
+    st.subheader("🔐 Admin: Archived Statements")
+
+    try:
+        admin_secret = st.secrets.get("ADMIN_PASSCODE", None)
+    except Exception:
+        admin_secret = None
+    if not admin_secret:
+        st.info(
+            "No admin passcode is set up yet. Go to your app's settings on "
+            "Streamlit Community Cloud → Secrets, and add:\n\n"
+            "`ADMIN_PASSCODE = \"choose-your-own-secret-word\"`"
+        )
+        return
+
+    entered = st.text_input("Enter admin passcode", type="password", key="admin_passcode_input")
+    if not entered:
+        st.stop()
+    if entered != admin_secret:
+        st.error("Incorrect passcode.")
+        st.stop()
+
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    files = sorted(ARCHIVE_DIR.glob("*"))
+    if not files:
+        st.info("No archived statements yet.")
+        return
+
+    st.write(f"**{len(files)} archived file(s):**")
+    for f in files:
+        size_kb = f.stat().st_size / 1024
+        st.write(f"- `{f.name}` ({size_kb:.1f} KB)")
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            zf.write(f, arcname=f.name)
+    zip_buf.seek(0)
+
+    st.download_button(
+        "⬇️ Download all as ZIP",
+        data=zip_buf,
+        file_name="archived_statements.zip",
+        mime="application/zip",
+    )
 
 # ---------------------------------------------------------------------------
 # EXTRACTION ENGINE
@@ -1069,3 +1122,6 @@ if uploaded_files:
     st.markdown('</div>', unsafe_allow_html=True)  # end bc-card-wrap
 
 st.markdown('<div class="bc-footer">🛡️ Bank2Excel — beta version: uploaded files may be retained temporarily to help improve support for more banks.</div>', unsafe_allow_html=True)
+
+if st.query_params.get("admin") == "true":
+    render_admin_panel()
