@@ -629,11 +629,34 @@ html, body { font-family: 'Inter', sans-serif; }
     background-color: #FCFCFE !important;
     border: 1.5px dashed #C7CEE8 !important;
     border-radius: 12px !important;
+    min-height: 150px !important;
+    padding: 1.2rem !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0.4rem !important;
 }
-[data-testid="stFileUploaderDropzoneInstructions"] { visibility: hidden; height: 0; margin: 0; padding: 0; }
-[data-testid="stFileUploaderDropzone"] svg { display: none; }
-[data-testid="stFileUploaderDropzone"] section { min-height: 40px; }
-[data-testid="stBaseButton-secondary"] { visibility: visible; }
+/* Native "Browse files" button: give it visible light styling instead of
+   Streamlit's default (which was rendering dark-on-dark in our theme). */
+[data-testid="stFileUploaderDropzone"] button {
+    background-color: #FFFFFF !important;
+    color: var(--accent) !important;
+    border: 1.5px solid #C7CEE8 !important;
+    border-radius: 8px !important;
+}
+[data-testid="stFileUploaderDropzone"] button:hover {
+    background-color: var(--accent-soft) !important;
+}
+[data-testid="stFileUploaderDropzone"] button svg {
+    fill: var(--accent) !important;
+}
+/* Uploaded-file row (name, size, remove button) sits inside the same
+   dropzone once a file is added — keep its icons/remove button visible
+   and just fix text contrast, never hide/remove elements here. */
+[data-testid="stFileUploaderDropzone"] small,
+[data-testid="stFileUploaderDropzone"] span {
+    color: var(--ink-soft) !important;
+}
 
 /* ---- format chips ---- */
 .bc-chiprow-label { font-size: 0.85rem; font-weight: 600; color: var(--ink); margin-bottom: 0.6rem; }
@@ -725,7 +748,7 @@ st.markdown("""
 # ---- hero ----
 st.markdown("""
 <div class="bc-hero">
-  <span class="bc-pill">AI-Powered &bull; Secure &bull; Accurate</span>
+  <span class="bc-pill">Fast &bull; Secure &bull; Accurate</span>
   <h1>Convert Bank Statements</h1>
   <h1 class="grad">into Excel in Seconds</h1>
   <p>Clean, reliable, and private. Your data is never stored.</p>
@@ -737,19 +760,20 @@ st.markdown('<div class="bc-card-wrap">', unsafe_allow_html=True)
 st.markdown("""
 <div class="bc-upload-icon">⬆️</div>
 <div class="bc-upload-text">
-  <div class="main">Drag &amp; drop your file here</div>
-  <div class="sub">or <span class="link">click to browse</span></div>
+  <div class="main">Drag &amp; drop your file here, or use Browse below</div>
 </div>
 """, unsafe_allow_html=True)
 
+# Note: the native uploader below already shows a working "Browse files"
+# button, a remove ("x") button per uploaded file, and the size/type
+# limit text — we style those natively instead of hiding/faking them,
+# so nothing here duplicates or breaks that built-in functionality.
 uploaded_files = st.file_uploader(
     "Upload PDF or Photos",
     type=["pdf", "png", "jpg", "jpeg"],
     accept_multiple_files=True,
     label_visibility="collapsed",
 )
-
-st.markdown('<div class="bc-upload-hint">Supports PDF, PNG, JPG &bull; Max size 200MB</div>', unsafe_allow_html=True)
 
 chip_col1, chip_col2 = st.columns(2)
 with chip_col1:
