@@ -539,17 +539,13 @@ st.markdown("""
 :root {
     --ink: #1F2430;
     --ink-soft: #6B7280;
-    --ink-faint: #9CA3AF;
-    --bg: #F5F7FB;
+    --bg: #FAFBFC;
     --card: #FFFFFF;
     --border: #E5E7EB;
     --accent: #4F63D2;
     --accent-soft: #EEF1FD;
-    --gradient: linear-gradient(90deg, #3E6FE0 0%, #17B4A6 100%);
-    --good: #17A567;
-    --good-soft: #EAFBF3;
-    --bad: #E0562F;
-    --bad-soft: #FDEEE9;
+    --good: #1F9D55;
+    --bad: #D0402B;
     color-scheme: light !important;
 }
 
@@ -564,8 +560,6 @@ html, body { font-family: 'Inter', sans-serif; }
     color: var(--ink) !important;
 }
 
-.block-container { padding-top: 1.2rem; max-width: 760px; }
-
 /* Streamlit's native file-uploader instruction text ("Drag and drop
    file here", size/type limits) isn't covered by our custom markdown,
    so it needs its own explicit color rule. */
@@ -575,199 +569,71 @@ html, body { font-family: 'Inter', sans-serif; }
     color: var(--ink-soft) !important;
 }
 
-/* ---- navbar ---- */
-.bc-navbar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding-bottom: 1.2rem; margin-bottom: 1.6rem; border-bottom: 1px solid var(--border);
-}
-.bc-navbar .brand { display: flex; align-items: center; gap: 0.5rem; font-size: 1.25rem; font-weight: 800; color: var(--ink); }
-.bc-navbar .brand .icon { font-size: 1.3rem; }
-.bc-navbar .right { display: flex; align-items: center; gap: 0.9rem; }
-.bc-secure { font-size: 0.82rem; color: var(--ink-soft); font-weight: 500; display: flex; align-items: center; gap: 0.3rem; }
-.bc-howitworks {
-    font-size: 0.82rem; color: var(--ink); font-weight: 500; border: 1px solid var(--border);
-    border-radius: 999px; padding: 0.32rem 0.85rem;
-}
+.bc-hero { text-align: center; padding: 2.2rem 0 0.6rem 0; }
+.bc-hero h1 { font-size: 2.3rem; font-weight: 800; margin-bottom: 0.5rem; letter-spacing: -0.02em; color: var(--ink) !important; }
+.bc-hero p { color: var(--ink-soft) !important; font-size: 1.05rem; margin-top: 0; }
 
-/* ---- hero ---- */
-.bc-pill {
-    display: inline-block; background: var(--accent-soft); color: var(--accent);
-    font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em;
-    padding: 0.3rem 0.9rem; border-radius: 999px; margin-bottom: 1.1rem;
+.bc-badgerow { text-align: center; margin: 0.35rem 0; }
+.bc-badgerow .tag {
+    display: inline-block; font-size: 0.72rem; color: var(--ink-soft);
+    font-weight: 600; letter-spacing: 0.06em; margin-right: 0.5rem;
 }
-.bc-hero { text-align: center; padding: 0.4rem 0 0.6rem 0; }
-.bc-hero h1 {
-    font-size: 2.35rem; font-weight: 800; margin: 0; line-height: 1.2;
-    letter-spacing: -0.02em; color: var(--ink) !important;
+.bc-badge {
+    display: inline-block; background: #F1F3F6; color: var(--ink);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 0.2rem 0.75rem; font-size: 0.82rem; font-weight: 500;
+    margin: 0.15rem 0.2rem;
 }
-.bc-hero h1.grad {
-    background: var(--gradient); -webkit-background-clip: text; background-clip: text;
-    -webkit-text-fill-color: transparent; margin-bottom: 0.6rem;
-}
-.bc-hero p { color: var(--ink-soft) !important; font-size: 1.02rem; margin-top: 0.3rem; }
+.bc-badge.out { background: var(--accent-soft); color: var(--accent); border-color: #D7DEFA; }
 
-/* ---- white cards ---- */
-.bc-card-wrap {
-    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
-    padding: 1.6rem 1.6rem 1.2rem 1.6rem; margin: 1.4rem 0;
-}
-.bc-card-wrap h3 { font-size: 1.05rem; font-weight: 700; color: var(--ink); margin: 0 0 1rem 0; }
+.bc-divider { height: 1px; background: var(--border); margin: 1.6rem 0; }
 
-/* ---- upload dropzone visuals ---- */
-.bc-upload-icon {
-    width: 56px; height: 56px; border-radius: 50%; background: var(--accent-soft);
-    display: flex; align-items: center; justify-content: center; margin: 0.2rem auto 0.9rem auto;
-    font-size: 1.5rem;
-}
-.bc-upload-text { text-align: center; margin-bottom: 0.6rem; }
-.bc-upload-text .main { font-size: 1rem; font-weight: 600; color: var(--ink); }
-.bc-upload-text .sub { font-size: 0.85rem; color: var(--ink-soft); margin-top: 0.15rem; }
-.bc-upload-text .sub a, .bc-upload-text .sub span.link { color: var(--accent); font-weight: 600; }
-.bc-upload-hint { text-align: center; font-size: 0.78rem; color: var(--ink-faint); margin-top: 0.6rem; }
+.bc-privacy { text-align: center; color: var(--ink-soft); font-size: 0.85rem; margin-top: 0.4rem; }
 
 [data-testid="stFileUploaderDropzone"] {
-    background-color: #FCFCFE !important;
-    border: 1.5px dashed #C7CEE8 !important;
-    border-radius: 12px !important;
-    min-height: 150px !important;
-    padding: 1.2rem !important;
-    flex-direction: column !important;
-    align-items: center !important;
-    justify-content: center !important;
-    gap: 0.4rem !important;
-}
-/* Native "Browse files" button: give it visible light styling instead of
-   Streamlit's default (which was rendering dark-on-dark in our theme). */
-[data-testid="stFileUploaderDropzone"] button {
-    background-color: #FFFFFF !important;
-    color: var(--accent) !important;
-    border: 1.5px solid #C7CEE8 !important;
-    border-radius: 8px !important;
-}
-[data-testid="stFileUploaderDropzone"] button:hover {
-    background-color: var(--accent-soft) !important;
-}
-[data-testid="stFileUploaderDropzone"] button svg {
-    fill: var(--accent) !important;
-}
-/* Uploaded-file row (name, size, remove button) sits inside the same
-   dropzone once a file is added — keep its icons/remove button visible
-   and just fix text contrast, never hide/remove elements here. */
-[data-testid="stFileUploaderDropzone"] small,
-[data-testid="stFileUploaderDropzone"] span {
-    color: var(--ink-soft) !important;
+    background-color: var(--card) !important;
+    border: 1.5px solid var(--border) !important;
+    border-radius: 14px !important;
 }
 
-/* ---- format chips ---- */
-.bc-chiprow-label { font-size: 0.85rem; font-weight: 600; color: var(--ink); margin-bottom: 0.6rem; }
-.bc-chips { display: flex; gap: 0.55rem; flex-wrap: wrap; }
-.bc-chip {
-    display: flex; align-items: center; gap: 0.4rem; border: 1.5px solid var(--border);
-    border-radius: 10px; padding: 0.45rem 0.9rem; font-size: 0.85rem; font-weight: 500; color: var(--ink-soft);
-    background: var(--card);
-}
-.bc-chip.selected { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
-
-.bc-privacy { text-align: center; color: var(--ink-soft); font-size: 0.85rem; margin: 1.1rem 0 0.4rem 0; }
-
-/* ---- stat cards ---- */
-.bc-stats { display: flex; gap: 0.9rem; flex-wrap: wrap; margin: 1.4rem 0; }
-.bc-stat {
+.bc-cards { display: flex; gap: 0.8rem; flex-wrap: wrap; margin: 1rem 0 1.6rem 0; }
+.bc-card {
     flex: 1 1 150px; background: var(--card); border: 1px solid var(--border);
-    border-radius: 14px; padding: 1.1rem 1.1rem; display: flex; align-items: center; gap: 0.8rem;
+    border-radius: 10px; padding: 0.9rem 1.1rem;
 }
-.bc-stat .ic {
-    width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center; font-size: 1.1rem;
-}
-.bc-stat .ic.blue { background: var(--accent-soft); }
-.bc-stat .ic.good { background: var(--good-soft); }
-.bc-stat .ic.bad { background: var(--bad-soft); }
-.bc-stat .txt .label { font-size: 0.78rem; color: var(--ink-soft); margin-bottom: 0.1rem; }
-.bc-stat .txt .value { font-size: 1.15rem; font-weight: 700; color: var(--ink); line-height: 1.2; }
-.bc-stat .txt .value.good { color: var(--good); }
-.bc-stat .txt .value.bad { color: var(--bad); }
+.bc-card .label { font-size: 0.76rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
+.bc-card .value { font-size: 1.3rem; font-weight: 700; color: var(--ink); }
+.bc-card.good .value { color: var(--good); }
+.bc-card.bad .value { color: var(--bad); }
 
-/* ---- select all / clear all as text links ---- */
-.bc-linkbtns .stButton>button {
-    background: transparent !important; color: var(--accent) !important; border: none !important;
-    font-weight: 600 !important; font-size: 0.85rem !important; padding: 0 !important; box-shadow: none !important;
-}
-.bc-linkbtns .stButton>button:hover { text-decoration: underline; background: transparent !important; }
-
-[data-testid="stCheckbox"] label p { font-size: 0.9rem !important; color: var(--ink) !important; }
-
-/* ---- preview footer row ---- */
-.bc-preview-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 0.7rem; }
-.bc-preview-foot .note { font-size: 0.85rem; color: var(--ink-soft); }
-
-/* ---- generic buttons ---- */
 .stButton>button, .stDownloadButton>button {
-    border-radius: 8px !important; font-weight: 600 !important; padding: 0.5rem 1rem !important;
+    background-color: var(--accent) !important; color: #FFFFFF !important;
+    border-radius: 8px !important; border: none !important;
+    font-weight: 600 !important; padding: 0.5rem 1rem !important;
 }
-.bc-primary-btn .stButton>button {
-    background-color: var(--accent) !important; color: #FFFFFF !important; border: none !important;
-}
-.bc-primary-btn .stButton>button:hover { background-color: #3C4EB8 !important; }
-.bc-ghost-btn .stButton>button {
-    background: var(--card) !important; color: var(--ink) !important; border: 1px solid var(--border) !important;
-}
-
-/* ---- download cards ---- */
-.bc-dl-excel .stDownloadButton>button {
-    background: var(--good-soft) !important; color: var(--good) !important;
-    border: 1.5px solid #BEEBD4 !important; width: 100%;
-}
-.bc-dl-excel .stDownloadButton>button:hover { background: #DEF7EA !important; }
-.bc-dl-csv .stDownloadButton>button {
-    background: var(--accent-soft) !important; color: var(--accent) !important;
-    border: 1.5px solid #D7DEFA !important; width: 100%;
-}
-.bc-dl-csv .stDownloadButton>button:hover { background: #E3E8FB !important; }
+.stButton>button:hover, .stDownloadButton>button:hover { background-color: #3C4EB8 !important; }
 
 [data-testid="stDataFrame"] { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 
-.bc-footer {
-    color: var(--ink-soft); font-size: 0.85rem; text-align: center; margin-top: 2.4rem;
-    padding-top: 1.1rem; border-top: 1px solid var(--border);
+.bc-brand {
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    font-size: 1.7rem; font-weight: 800; color: var(--accent) !important;
+    letter-spacing: -0.01em; margin-bottom: 1.6rem;
 }
+.bc-brand .icon { font-size: 1.5rem; }
+
+.bc-footer { color: var(--ink-soft); font-size: 0.85rem; text-align: center; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); }
 </style>
 """, unsafe_allow_html=True)
 
-# ---- navbar ----
-st.markdown("""
-<div class="bc-navbar">
-  <div class="brand"><span class="icon">📊</span>Bank2Excel</div>
-  <div class="right">
-    <div class="bc-secure">🛡️ 100% Secure</div>
-    <div class="bc-howitworks">❓ How it works</div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-# ---- hero ----
 st.markdown("""
 <div class="bc-hero">
-  <span class="bc-pill">Fast &bull; Secure &bull; Accurate</span>
-  <h1>Convert Bank Statements</h1>
-  <h1 class="grad">into Excel in Seconds</h1>
-  <p>Clean, reliable, and private. Your data is never stored.</p>
+  <div class="bc-brand"><span class="icon">📊</span>Bank2Excel</div>
+  <h1>Convert Statements with Precision</h1>
+  <p>Clean, reliable extraction for all your financial documents.</p>
 </div>
 """, unsafe_allow_html=True)
 
-# ---- upload card ----
-st.markdown('<div class="bc-card-wrap">', unsafe_allow_html=True)
-st.markdown("""
-<div class="bc-upload-icon">⬆️</div>
-<div class="bc-upload-text">
-  <div class="main">Drag &amp; drop your file here, or use Browse below</div>
-</div>
-""", unsafe_allow_html=True)
-
-# Note: the native uploader below already shows a working "Browse files"
-# button, a remove ("x") button per uploaded file, and the size/type
-# limit text — we style those natively instead of hiding/faking them,
-# so nothing here duplicates or breaks that built-in functionality.
 uploaded_files = st.file_uploader(
     "Upload PDF or Photos",
     type=["pdf", "png", "jpg", "jpeg"],
@@ -775,28 +641,17 @@ uploaded_files = st.file_uploader(
     label_visibility="collapsed",
 )
 
-chip_col1, chip_col2 = st.columns(2)
-with chip_col1:
-    st.markdown("""
-    <div class="bc-chiprow-label">Input Format</div>
-    <div class="bc-chips">
-      <div class="bc-chip selected">📄 PDF</div>
-      <div class="bc-chip">🖼️ Image</div>
-      <div class="bc-chip">🖼️ JPG</div>
-      <div class="bc-chip">🖼️ PNG</div>
-    </div>
-    """, unsafe_allow_html=True)
-with chip_col2:
-    st.markdown("""
-    <div class="bc-chiprow-label">Output Format</div>
-    <div class="bc-chips">
-      <div class="bc-chip selected">📗 Excel</div>
-      <div class="bc-chip">📄 CSV</div>
-    </div>
-    """, unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)  # end bc-card-wrap
-
-st.markdown('<div class="bc-privacy">🔒 We do not store your files. Your privacy is our priority.</div>', unsafe_allow_html=True)
+st.markdown("""
+<div class="bc-badgerow"><span class="tag">INPUT</span>
+  <span class="bc-badge">PDF</span><span class="bc-badge">Photos</span>
+  <span class="bc-badge">JPG</span><span class="bc-badge">PNG</span>
+</div>
+<div class="bc-badgerow"><span class="tag">OUTPUT</span>
+  <span class="bc-badge out">Excel</span><span class="bc-badge out">CSV</span>
+</div>
+<div class="bc-divider"></div>
+<div class="bc-privacy">🔒 We do not store your data. Your privacy is our priority.</div>
+""", unsafe_allow_html=True)
 
 if uploaded_files:
     pdfs = [f for f in uploaded_files if f.type == "application/pdf" or f.name.lower().endswith(".pdf")]
@@ -814,7 +669,7 @@ if uploaded_files:
         st.session_state["converted"] = False
         st.session_state["last_file_signature"] = file_signature
 
-    st.markdown('<div class="bc-primary-btn" style="text-align:center; margin: 1rem 0;">', unsafe_allow_html=True)
+    st.markdown('<div style="text-align:center; margin: 1rem 0;">', unsafe_allow_html=True)
     convert_clicked = st.button("✅  Convert", use_container_width=False, type="primary")
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -902,31 +757,30 @@ if uploaded_files:
     total_withdrawal = df[DISPLAY_NAMES["withdrawal"]].apply(_num).sum()
     total_deposit = df[DISPLAY_NAMES["deposit"]].apply(_num).sum()
     net = total_deposit - total_withdrawal
-    net_class = "good" if net >= 0 else "bad"
 
     st.markdown(f"""
-    <div class="bc-stats">
-      <div class="bc-stat">
-        <div class="ic blue">📋</div>
-        <div class="txt"><div class="value">{len(df)}</div><div class="label">Transactions</div></div>
+    <div class="bc-cards">
+      <div class="bc-card">
+        <div class="label">Transactions</div>
+        <div class="value">{len(df)}</div>
       </div>
-      <div class="bc-stat">
-        <div class="ic bad">₹</div>
-        <div class="txt"><div class="value">₹{total_withdrawal:,.2f}</div><div class="label">Total Withdrawn</div></div>
+      <div class="bc-card bad">
+        <div class="label">Total Withdrawn</div>
+        <div class="value">₹{total_withdrawal:,.2f}</div>
       </div>
-      <div class="bc-stat">
-        <div class="ic blue">⬇️</div>
-        <div class="txt"><div class="value">₹{total_deposit:,.2f}</div><div class="label">Total Deposited</div></div>
+      <div class="bc-card good">
+        <div class="label">Total Deposited</div>
+        <div class="value">₹{total_deposit:,.2f}</div>
       </div>
-      <div class="bc-stat">
-        <div class="ic good">📈</div>
-        <div class="txt"><div class="value {net_class}">₹{net:,.2f}</div><div class="label">Net Change</div></div>
+      <div class="bc-card {'good' if net >= 0 else 'bad'}">
+        <div class="label">Net Change</div>
+        <div class="value">₹{net:,.2f}</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
     # --- column selection ---
-    st.markdown('<div class="bc-card-wrap">', unsafe_allow_html=True)
+    st.subheader("Choose columns to include")
     all_cols = list(df.columns)
 
     def _select_all():
@@ -937,29 +791,22 @@ if uploaded_files:
         for c in all_cols:
             st.session_state[f"chk_{c}"] = False
 
-    header_col, link1_col, link2_col = st.columns([6, 1, 1])
-    with header_col:
-        st.markdown('<h3>Choose columns to include</h3>', unsafe_allow_html=True)
-    with link1_col:
-        st.markdown('<div class="bc-linkbtns">', unsafe_allow_html=True)
-        st.button("Select All", on_click=_select_all, key="select_all_btn")
-        st.markdown('</div>', unsafe_allow_html=True)
-    with link2_col:
-        st.markdown('<div class="bc-linkbtns">', unsafe_allow_html=True)
-        st.button("Clear All", on_click=_clear_all, key="clear_all_btn")
-        st.markdown('</div>', unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.button("Select all", on_click=_select_all, use_container_width=True)
+    with col2:
+        st.button("Clear all", on_click=_clear_all, use_container_width=True)
 
     selected = []
-    checkbox_cols = st.columns(4)
+    checkbox_cols = st.columns(3)
     for i, col_name in enumerate(all_cols):
-        with checkbox_cols[i % 4]:
+        with checkbox_cols[i % 3]:
             key = f"chk_{col_name}"
             if key not in st.session_state:
                 st.session_state[key] = True  # default: everything selected
             checked = st.checkbox(col_name, key=key)
             if checked:
                 selected.append(col_name)
-    st.markdown('</div>', unsafe_allow_html=True)  # end bc-card-wrap
 
     if not selected:
         st.warning("Select at least one column to see a preview and download.")
@@ -968,33 +815,12 @@ if uploaded_files:
     preview_df = df[selected]
 
     # --- preview ---
-    st.markdown('<div class="bc-card-wrap">', unsafe_allow_html=True)
-    st.markdown('<h3>Preview</h3>', unsafe_allow_html=True)
-
-    if "show_all_rows" not in st.session_state:
-        st.session_state["show_all_rows"] = False
-
-    rows_to_show = preview_df if st.session_state["show_all_rows"] else preview_df.head(5)
-    st.dataframe(rows_to_show, use_container_width=True, hide_index=True)
-
-    st.markdown('<div class="bc-preview-foot">', unsafe_allow_html=True)
-    pf_col1, pf_col2 = st.columns([2, 1])
-    with pf_col1:
-        shown_count = len(preview_df) if st.session_state["show_all_rows"] else min(5, len(preview_df))
-        st.markdown(f'<div class="note">Showing {"all" if st.session_state["show_all_rows"] else "preview of"} {shown_count} rows</div>', unsafe_allow_html=True)
-    with pf_col2:
-        st.markdown('<div class="bc-ghost-btn">', unsafe_allow_html=True)
-        toggle_label = "👁 Hide Extra Rows" if st.session_state["show_all_rows"] else "👁 View All Rows"
-        if st.button(toggle_label, key="toggle_rows_btn", use_container_width=True):
-            st.session_state["show_all_rows"] = not st.session_state["show_all_rows"]
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)  # end bc-preview-foot
-    st.markdown('</div>', unsafe_allow_html=True)  # end bc-card-wrap
+    st.markdown('<div class="bc-divider"></div>', unsafe_allow_html=True)
+    st.subheader("Preview")
+    st.dataframe(preview_df.head(20), use_container_width=True, hide_index=True)
 
     # --- downloads ---
-    st.markdown('<div class="bc-card-wrap">', unsafe_allow_html=True)
-    st.markdown('<h3>Download your file</h3>', unsafe_allow_html=True)
+    st.subheader("Download")
 
     excel_buf = io.BytesIO()
     with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
@@ -1005,25 +831,20 @@ if uploaded_files:
 
     dl1, dl2 = st.columns(2)
     with dl1:
-        st.markdown('<div class="bc-dl-excel">', unsafe_allow_html=True)
         st.download_button(
-            "📗  Download Excel",
+            "⬇️  Download Excel",
             data=excel_buf,
             file_name="bank_statement.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-        st.markdown('</div>', unsafe_allow_html=True)
     with dl2:
-        st.markdown('<div class="bc-dl-csv">', unsafe_allow_html=True)
         st.download_button(
-            "📄  Download CSV",
+            "⬇️  Download CSV",
             data=csv_bytes,
             file_name="bank_statement.csv",
             mime="text/csv",
             use_container_width=True,
         )
-        st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)  # end bc-card-wrap
 
-st.markdown('<div class="bc-footer">🛡️ Bank2Excel — your files are processed for this session only.</div>', unsafe_allow_html=True)
+st.markdown('<div class="bc-footer">Bank2Excel — your files are processed for this session only.</div>', unsafe_allow_html=True)
