@@ -3,6 +3,7 @@ BankConverter — upload a bank statement PDF, get a clean Excel/CSV file.
 Single-file Streamlit app. No coding needed to run it — see README.md
 for how to put this online for free.
 """
+import difflib
 import io
 import os
 import re
@@ -143,6 +144,25 @@ HEADER_KEYWORDS = {
     "balance":   ["balance", "total", "running balance", "closing balance"],
 }
 
+# Only the longer, more distinctive keyword per column -- used for fuzzy
+# (edit-distance) matching as a fallback when OCR has corrupted a header
+# label past what exact/substring matching can recognize (e.g. photographed
+# statements). Short/generic words like "cr", "dr", "ref", "total" are
+# deliberately excluded here: they're too easy to accidentally fuzzy-match
+# against unrelated garbled text (a real failure mode found during testing --
+# a scrambled fragment of "Closing" matched "credit" at a plausible-looking
+# ratio). Keeping this list to distinctive multi-letter/multi-word keywords
+# keeps false positives rare while still tolerating real OCR noise.
+FUZZY_HEADER_KEYWORDS = {
+    "value_dt":  ["value date"],
+    "narration": ["narration", "particulars", "description", "transaction details", "remarks"],
+    "ref_no":    ["cheque", "reference", "instrument"],
+    "withdrawal":["withdrawal", "paid out"],
+    "deposit":   ["deposit", "paid in"],
+    "balance":   ["closing balance", "running balance"],
+}
+FUZZY_MATCH_THRESHOLD = 0.55
+
 
 def classify_header_word(text):
     """Classify a (possibly multi-word) header label into a canonical column."""
@@ -158,11 +178,86 @@ def classify_header_word(text):
     return None
 
 
-def merge_header_labels(line_words, gap=7):
+def classify_header_labels_text_only(labels):
+    """Tiers 1+2 only (exact match, then fuzzy match) -- no positional
+    guessing. Used to DETECT whether a candidate line actually is a header
+    row, based purely on real text evidence. (Positional fallback is
+    deliberately excluded here: if it were used for detection too, almost
+    any line could superficially "look like" a header, since a leftmost/
+    rightmost label would auto-qualify as date/balance regardless of its
+    real content.)
+    """
+    assigned = [classify_header_word(lab['text']) for lab in labels]
+
+    for i, lab in enumerate(labels):
+        if assigned[i] is not None:
+            continue
+        t = re.sub(r'[^a-z ]', ' ', lab['text'].lower())
+        t = re.sub(r'\s+', ' ', t).strip()
+        if len(t) < 4:
+            continue
+        best_key, best_ratio = None, 0.0
+        for key, kws in FUZZY_HEADER_KEYWORDS.items():
+            for kw in kws:
+                r = difflib.SequenceMatcher(None, kw, t).ratio()
+                if r > best_ratio:
+                    best_ratio, best_key = r, key
+        if best_ratio >= FUZZY_MATCH_THRESHOLD:
+            assigned[i] = best_key
+
+    return assigned
+
+
+def classify_header_labels(labels):
+    """Classify every header label on a row ALREADY CONFIRMED to be the
+    header (via classify_header_labels_text_only + find_header_row), in
+    three tiers:
+
+    1) exact/substring keyword match (classify_header_word) -- tried first for
+       every label, so this never changes behaviour for clean digital PDFs.
+    2) fuzzy text match -- tolerates OCR noise (e.g. "Narratiea" -> narration),
+       only used for labels tier 1 couldn't classify at all.
+    3) positional fallback -- on every bank statement layout seen so far the
+       leftmost header column is the date and the rightmost is the balance,
+       regardless of OCR quality. Used only as a last resort, only for
+       'date'/'balance', and only if that column wasn't found anywhere in
+       this row by tiers 1-2. Safe here specifically because this row has
+       already been confirmed a real header by classify_header_labels_text_only.
+
+    Returns a list of canonical column names (or None), same length/order as
+    `labels`.
+    """
+    assigned = classify_header_labels_text_only(labels)
+
+    if labels:
+        order = sorted(range(len(labels)), key=lambda i: labels[i]['x0'])
+        if 'date' not in assigned:
+            left_i = order[0]
+            if assigned[left_i] is None:
+                assigned[left_i] = 'date'
+        if 'balance' not in assigned:
+            right_i = order[-1]
+            if assigned[right_i] is None:
+                assigned[right_i] = 'balance'
+
+    return assigned
+
+
+def merge_header_labels(line_words, gap=7, max_label_width=160):
     """
     Merge adjacent header words into full labels before classifying, so
     multi-word headers like "Transaction Details" or "Debit (Rs.)" are
     recognized as one label instead of failing word-by-word.
+
+    max_label_width caps how wide a single merged label can grow: real
+    bank-statement header labels (even multi-word ones like "Closing
+    Balance" or "Chq./Ref.No.") are always well under this. The cap exists
+    to stop a chain of noisy/duplicate words (e.g. from OCR on a
+    photographed statement, or from merging two overlapping OCR passes)
+    from silently fusing into one giant blob that would swallow the space
+    of multiple real columns -- a much worse failure than simply not
+    recognizing a label, since it can misclassify a whole neighboring
+    column's data (e.g. deposits read as withdrawals) without any error.
     """
     if not line_words:
         return []
@@ -170,7 +265,7 @@ def merge_header_labels(line_words, gap=7):
     labels = []
     cur = {"text": ordered[0]['text'], "x0": ordered[0]['x0'], "x1": ordered[0]['x1']}
     for w in ordered[1:]:
-        if w['x0'] - cur['x1'] <= gap:
+        if w['x0'] - cur['x1'] <= gap and (w['x1'] - cur['x0']) <= max_label_width:
             cur['text'] += ' ' + w['text']
             cur['x1'] = max(cur['x1'], w['x1'])
         else:
@@ -207,24 +302,36 @@ def find_header_row(words):
 
     def is_valid_header(line_words):
         labels = merge_header_labels(line_words)
-        classified = [classify_header_word(lab['text']) for lab in labels]
-        has_date = 'date' in classified
+        classified = classify_header_labels_text_only(labels)
         has_narr = 'narration' in classified
         has_amt = any(c in ('withdrawal', 'deposit', 'balance') for c in classified)
-        return has_date and has_narr and has_amt
+        # Require narration + an amount-type column via real text evidence --
+        # specific enough that a random body-text line won't coincidentally
+        # match both. 'date' is deliberately not required here: OCR on
+        # photographed statements sometimes drops the short word "Date"
+        # entirely, and positional fallback (leftmost = date) safely covers
+        # that once a row has already qualified as a real header this way.
+        return has_narr and has_amt
 
+    # A header row's words can be scattered across several clustered "lines"
+    # on a photographed/skewed statement (baseline jitter exceeds the tight
+    # tolerance used for body-row splitting). Try growing windows of
+    # consecutive lines -- starting from a single line and extending -- so
+    # header fragments spread across a wider vertical band still get
+    # combined, without loosening the tolerance used elsewhere for accuracy.
+    MAX_HEADER_SPAN = 70  # points; header fragments rarely spread wider than this
     for i, (top, line_words) in enumerate(lines):
-        if is_valid_header(line_words):
-            return top, line_words
-
-        # some headers wrap a label across two stacked lines (e.g.
-        # "Transaction" / "Date") -- try combining with the next line too
-        if i + 1 < len(lines):
-            next_top, next_words = lines[i + 1]
-            if next_top - top < 15:
-                combined = line_words + next_words
-                if is_valid_header(combined):
-                    return top, combined
+        combined = list(line_words)
+        last_top = top
+        if is_valid_header(combined):
+            return last_top, combined
+        j = i + 1
+        while j < len(lines) and lines[j][0] - top <= MAX_HEADER_SPAN:
+            combined = combined + lines[j][1]
+            last_top = lines[j][0]
+            if is_valid_header(combined):
+                return last_top, combined
+            j += 1
 
     return None, None
 
@@ -241,9 +348,13 @@ def is_combined_amount_label(text):
 
 def build_columns(header_words, page_width):
     labels = merge_header_labels(header_words)
+    # This function only ever receives the words of a row find_header_row has
+    # already confirmed to be the real header (via text-only classification),
+    # so it's safe to use the full classifier here, including positional
+    # fallback for date/balance.
+    classified = classify_header_labels(labels)
     groups = {}
-    for lab in labels:
-        col = classify_header_word(lab['text'])
+    for lab, col in zip(labels, classified):
         if col is None:
             continue
         g = groups.setdefault(col, {"x0": lab['x0'], "x1": lab['x1'], "text": lab['text']})
