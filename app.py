@@ -137,7 +137,7 @@ HEADER_KEYWORDS = {
     "value_dt":  ["value date", "value"],
     "date":      ["date"],
     "narration": ["narration", "particular", "particulars", "description",
-                  "details", "transaction details", "remarks", "transaction remarks"],
+                  "transaction details", "remarks", "transaction remarks"],
     "ref_no":    ["chq", "cheque", "ref", "instrument", "instruments", "reference"],
     "withdrawal":["withdrawal", "debit", "paid out", "dr amount", " dr "],
     "deposit":   ["deposit", "credit", "paid in", "cr amount", " cr "],
@@ -161,7 +161,7 @@ FUZZY_HEADER_KEYWORDS = {
     "deposit":   ["deposit", "paid in"],
     "balance":   ["closing balance", "running balance"],
 }
-FUZZY_MATCH_THRESHOLD = 0.55
+FUZZY_MATCH_THRESHOLD = 0.65
 
 
 def classify_header_word(text):
@@ -303,15 +303,19 @@ def find_header_row(words):
     def is_valid_header(line_words):
         labels = merge_header_labels(line_words)
         classified = classify_header_labels_text_only(labels)
+        has_date = 'date' in classified
         has_narr = 'narration' in classified
         has_amt = any(c in ('withdrawal', 'deposit', 'balance') for c in classified)
-        # Require narration + an amount-type column via real text evidence --
-        # specific enough that a random body-text line won't coincidentally
-        # match both. 'date' is deliberately not required here: OCR on
-        # photographed statements sometimes drops the short word "Date"
-        # entirely, and positional fallback (leftmost = date) safely covers
-        # that once a row has already qualified as a real header this way.
-        return has_narr and has_amt
+        # Require date + narration + an amount-type column, all via real text
+        # evidence. This is deliberately strict: bank statements often have
+        # an unrelated "Account Summary" block before the real transaction
+        # table, and that block can coincidentally contain words that match
+        # narration/amount keywords (e.g. "Nomination" fuzzy-matching
+        # "narration", or a "Fixed Deposits" column literally containing
+        # "deposit") -- requiring a real date match alongside them is what
+        # actually distinguishes the transaction header from that noise,
+        # since a summary block never has a date column.
+        return has_date and has_narr and has_amt
 
     # A header row's words can be scattered across several clustered "lines"
     # on a photographed/skewed statement (baseline jitter exceeds the tight
@@ -319,19 +323,28 @@ def find_header_row(words):
     # consecutive lines -- starting from a single line and extending -- so
     # header fragments spread across a wider vertical band still get
     # combined, without loosening the tolerance used elsewhere for accuracy.
+    # Prefer the smallest possible header window, searched across the WHOLE
+    # document at each size before growing wider. This matters: trying
+    # "start here and grow forward" per starting line (the old approach)
+    # let an early messy multi-line combination -- e.g. an unrelated
+    # Account Summary block that happens to sit within reach of the real
+    # header a few lines later -- win before the real header was ever
+    # tried alone. Checking every single line first, then every 2-line
+    # combination, etc., means a clean single-line header always wins.
     MAX_HEADER_SPAN = 70  # points; header fragments rarely spread wider than this
-    for i, (top, line_words) in enumerate(lines):
-        combined = list(line_words)
-        last_top = top
-        if is_valid_header(combined):
-            return last_top, combined
-        j = i + 1
-        while j < len(lines) and lines[j][0] - top <= MAX_HEADER_SPAN:
-            combined = combined + lines[j][1]
-            last_top = lines[j][0]
+    MAX_WINDOW_LINES = 5
+    for window_size in range(1, MAX_WINDOW_LINES + 1):
+        for i in range(len(lines)):
+            j = i + window_size - 1
+            if j >= len(lines):
+                break
+            if lines[j][0] - lines[i][0] > MAX_HEADER_SPAN:
+                continue
+            combined = []
+            for k in range(i, j + 1):
+                combined += lines[k][1]
             if is_valid_header(combined):
-                return last_top, combined
-            j += 1
+                return lines[j][0], combined
 
     return None, None
 
@@ -488,7 +501,7 @@ def find_footer_top(words, page_height, header_top=None):
     candidates = []
     by_line = {}
     for w in words:
-        if header_top is not None and abs(w['top'] - header_top) < 20:
+        if header_top is not None and (w['top'] <= header_top or abs(w['top'] - header_top) < 20):
             continue
         key = round(w['top'])
         by_line.setdefault(key, []).append(w)
@@ -508,6 +521,14 @@ def get_grid_row_bands(page, table_top, table_bottom):
     tops = sorted(set(round(l['top'], 1) for l in lines))
     if len(tops) < 3:
         return None
+    # Some layouts don't have a distinct ruled line right between the header
+    # banner and the first data row (only the row-1/row-2 separator exists
+    # within our range) -- without this, the entire first transaction row
+    # silently has no band at all and gets dropped. If there's a gap after
+    # table_top wide enough to plausibly hold a full row, anchor the first
+    # band there instead of at the first internal line.
+    if tops[0] - table_top > 10:
+        tops = [table_top] + tops
     return [(tops[i], tops[i+1]) for i in range(len(tops)-1)]
 
 
@@ -624,6 +645,46 @@ def process_pages(pages):
         # in amount fields, which should contain nothing but currency.
         for amt_col in ('withdrawal', 'deposit', 'balance'):
             flat[amt_col] = re.sub(r'(?<=\d)-(?=\d{2}\b)', '.', flat[amt_col])
+
+        # A stray short numeral from the end of a wrapped narration line
+        # (e.g. an address fragment like "...DO 3 MUMBAI...") can
+        # occasionally land just past the narration/amount column boundary,
+        # producing a malformed cell like "3,25,000.00 3". A bare token like
+        # that can't be told apart from a genuine tiny amount by its text
+        # alone (looks_like_amount would accept "3" either way) -- but every
+        # real amount in these statements is properly formatted (comma
+        # grouping and/or a decimal point), so when a cell has multiple
+        # tokens, keep only the properly-formatted one and send any bare
+        # stray token back to the narration instead of corrupting the amount.
+        def _is_well_formed_amount(tok):
+            return bool(re.match(r'^-?[\d,]*\d\.\d{1,2}$', tok))
+
+        for amt_col in ('withdrawal', 'deposit', 'balance'):
+            tokens = flat[amt_col].split()
+            if len(tokens) > 1:
+                well_formed = [t for t in tokens if _is_well_formed_amount(t)]
+                stray = [t for t in tokens if not _is_well_formed_amount(t)]
+                if well_formed:
+                    flat[amt_col] = well_formed[0]
+                    if stray:
+                        flat['narration'] = (flat['narration'] + ' ' + ' '.join(stray)).strip()
+
+        # Same bleed pattern, different shape: a transaction that's really
+        # only a withdrawal (or only a deposit) sometimes ends up with a
+        # lone bare stray token in the OTHER amount column instead of it
+        # being empty -- e.g. withdrawal="2,500.00" alongside a phantom
+        # deposit="3". If exactly one side is a real well-formed amount and
+        # the other is a non-empty token that isn't, the second one is
+        # narration bleed too.
+        wd, dep = flat['withdrawal'], flat['deposit']
+        if wd and dep:
+            wd_ok, dep_ok = _is_well_formed_amount(wd), _is_well_formed_amount(dep)
+            if wd_ok and not dep_ok:
+                flat['narration'] = (flat['narration'] + ' ' + dep).strip()
+                flat['deposit'] = ''
+            elif dep_ok and not wd_ok:
+                flat['narration'] = (flat['narration'] + ' ' + wd).strip()
+                flat['withdrawal'] = ''
 
         if combined_amount_col:
             # single Withdrawal/Deposit column (e.g. "980.50(D)") -- route
