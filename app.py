@@ -1066,9 +1066,14 @@ html, body { font-family: 'Inter', sans-serif; }
 """, unsafe_allow_html=True)
 
 # ---- navbar ----
-st.markdown("""
+BE_LOGO_SVG = """<svg width="30" height="30" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+  <text x="0" y="30" font-family="Arial, sans-serif" font-weight="900" font-size="30" fill="none" stroke="#4F63D2" stroke-width="2.1" stroke-linejoin="round">B</text>
+  <text x="17" y="30" font-family="Arial, sans-serif" font-weight="900" font-size="30" fill="none" stroke="#4F63D2" stroke-width="2.1" stroke-linejoin="round">E</text>
+</svg>"""
+
+st.markdown(f"""
 <div class="bc-navbar">
-  <div class="brand"><span class="icon">📊</span>Bank2Excel</div>
+  <div class="brand">{BE_LOGO_SVG}Bank2Excel</div>
   <div class="right">
     <div class="bc-secure">🛡️ 100% Secure</div>
     <div class="bc-howitworks">❓ How it works</div>
@@ -1089,7 +1094,7 @@ st.markdown("""
 # ---- upload card ----
 with st.container(key="upload_card"):
     st.markdown("""
-    <div class="bc-upload-icon">⬆️</div>
+    <div class="bc-upload-icon">⬇️</div>
     <div class="bc-upload-text">
       <div class="main">Drag &amp; drop your file here, or use Browse below</div>
     </div>
